@@ -13,8 +13,6 @@ from pathlib import Path
 from tkinter import messagebox
 
 
-# When frozen by PyInstaller, __file__ points into the temporary bundle.
-# Audio lives beside the executable, so use the executable's directory.
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
 else:
@@ -304,13 +302,17 @@ class OpenTransmit(tk.Tk):
         menu = self.device_menu["menu"]
         menu.delete(0, "end")
         for value, label in devices:
-            menu.add_command(label=label, command=lambda v=value: self.device_var.set(v))
+            menu.add_command(label=label, command=lambda v=value: self._select_device(v))
 
         values = [value for value, _ in devices]
         if self.device_var.get() not in values:
             self.device_var.set(values[0])
 
         self.player.set_output(backend, self.device_var.get())
+
+    def _select_device(self, value):
+        self.device_var.set(value)
+        self.player.set_output(self.backend_var.get(), value)
 
     @staticmethod
     def _pipewire_devices():
