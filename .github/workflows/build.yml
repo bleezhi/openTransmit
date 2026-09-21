@@ -1,0 +1,73 @@
+name: Build openTransmit
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pyinstaller
+      - name: Build Linux executable
+        run: |
+          pyinstaller --onefile --name openTransmit-linux radio.py
+          chmod +x openTransmit-linux/openTransmit-linux
+          mkdir -p package/openTransmit-linux/audio/{ads,promos,music,idents}
+          cp openTransmit-linux/openTransmit-linux package/openTransmit-linux/
+          cp README.md package/openTransmit-linux/
+          cp -r audio/. package/openTransmit-linux/audio/
+          tar -czf openTransmit-linux.tar.gz -C package openTransmit-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openTransmit-linux
+          path: openTransmit-linux.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pyinstaller
+      - name: Build Windows executable
+        run: |
+          pyinstaller --onefile --windowed --name openTransmit-windows radio.py
+          New-Item -ItemType Directory -Force -Path package/openTransmit-windows/audio/ads,package/openTransmit-windows/audio/promos,package/openTransmit-windows/audio/music,package/openTransmit-windows/audio/idents
+          Copy-Item dist/openTransmit-windows.exe package/openTransmit-windows/
+          Copy-Item README.md package/openTransmit-windows/
+          Copy-Item audio/* package/openTransmit-windows/audio/ -Recurse -Force
+          Compress-Archive -Path package/openTransmit-windows -DestinationPath openTransmit-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openTransmit-windows
+          path: openTransmit-windows.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/openTransmit-linux/openTransmit-linux.tar.gz
+            release/openTransmit-windows/openTransmit-windows.zip
