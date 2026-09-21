@@ -6,13 +6,21 @@ from __future__ import annotations
 import random
 import shutil
 import subprocess
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 
 
-AUDIO_DIR = Path(__file__).parent / "audio"
+# When frozen by PyInstaller, __file__ points into the temporary bundle.
+# Audio lives beside the executable, so use the executable's directory.
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).resolve().parent
+else:
+    APP_DIR = Path(__file__).resolve().parent
+
+AUDIO_DIR = APP_DIR / "audio"
 CATEGORIES = ("music", "ads", "promos", "idents")
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".opus"}
 
@@ -62,8 +70,6 @@ class Player:
         else:
             command = [
                 self.backend, "-nodisp", "-autoexit", "-loglevel", "quiet",
-                "-f", "lavfi",
-                "-i", "anullsrc",
                 str(path),
             ]
 
@@ -76,7 +82,6 @@ class Player:
         if self.output_backend == "ALSA":
             return "alsa/" + self.output_device
         if self.output_backend == "PipeWire":
-            # mpv's pipewire backend accepts pipewire/<node-name>.
             if self.output_device == "default":
                 return "pipewire/"
             return "pipewire/" + self.output_device
@@ -151,8 +156,8 @@ class OpenTransmit(tk.Tk):
 
         self._label(header, "openTransmit", GREEN, self.title_font).pack(side="left")
         self._label(header, "  // radio automation console", DIM, self.small_font).pack(side="left")
-        self._button(header, "[ AUTO RADIO ]", self._auto_changed, GREEN).pack(side="right")
-        self.auto_button = header.winfo_children()[-1]
+        self.auto_button = self._button(header, "[ AUTO RADIO ]", self._auto_changed, GREEN)
+        self.auto_button.pack(side="right")
 
         status = self._frame(self, bg=PANEL2)
         status.pack(fill="x", padx=16, pady=(0, 10))
@@ -244,9 +249,12 @@ class OpenTransmit(tk.Tk):
         self._button(controls, "[ stop ]", self.stop, RED).pack(side="right")
         self._button(controls, "[ generate auto queue ]", self.generate_auto_queue, CYAN).pack(side="right", padx=6)
 
-        self._label(self, "  output selection: live  |  playback: mpv/ffplay  |  audio: ./audio/{ads,promos,music,idents}", DIM, self.small_font).pack(
-            fill="x", padx=16, pady=(0, 10)
-        )
+        self._label(
+            self,
+            "  output selection: live  |  playback: mpv/ffplay  |  audio: ./audio/{ads,promos,music,idents}",
+            DIM,
+            self.small_font,
+        ).pack(fill="x", padx=16, pady=(0, 10))
 
         if not self.player.backend:
             self._set_status("NO PLAYER", RED, "install mpv or ffplay")
@@ -267,9 +275,25 @@ class OpenTransmit(tk.Tk):
         self.library.delete(0, tk.END)
         folder = AUDIO_DIR / self.category.get()
         folder.mkdir(parents=True, exist_ok=True)
-        for path in sorted(folder.iterdir()):
-            if path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS:
-                self.library.insert(tk.END, path.name)
+        files = self._audio_files(folder)
+        for path in files:
+            try:
+                display = path.relative_to(folder).as_posix()
+            except ValueError:
+                display = path.name
+            self.library.insert(tk.END, display)
+
+    @staticmethod
+    def _audio_files(folder: Path) -> list[Path]:
+        if not folder.exists():
+            return []
+        return sorted(
+            (
+                path for path in folder.rglob("*")
+                if path.is_file() and path.suffix.casefold() in AUDIO_EXTENSIONS
+            ),
+            key=lambda path: path.relative_to(folder).as_posix().casefold(),
+        )
 
     def refresh_outputs(self):
         backend = self.backend_var.get()
@@ -280,10 +304,7 @@ class OpenTransmit(tk.Tk):
         menu = self.device_menu["menu"]
         menu.delete(0, "end")
         for value, label in devices:
-            menu.add_command(
-                label=label,
-                command=lambda v=value: self.device_var.set(v)
-            )
+            menu.add_command(label=label, command=lambda v=value: self.device_var.set(v))
 
         values = [value for value, _ in devices]
         if self.device_var.get() not in values:
@@ -336,17 +357,17 @@ class OpenTransmit(tk.Tk):
             if name in seen:
                 continue
             seen.add(name)
-            label = name
-            devices.append((name, label))
+            devices.append((name, name))
         return devices
 
     def add_selected(self):
         folder = AUDIO_DIR / self.category.get()
         for index in self.library.curselection():
-            path = folder / self.library.get(index)
+            relative = Path(self.library.get(index))
+            path = folder / relative
             if path.exists():
                 self.queue.append(path)
-                self.queue_list.insert(tk.END, f"[{self.category.get()}] {path.name}")
+                self.queue_list.insert(tk.END, f"[{self.category.get()}] {relative.as_posix()}")
 
     def remove_selected(self):
         for index in reversed(self.queue_list.curselection()):
@@ -452,8 +473,8 @@ class OpenTransmit(tk.Tk):
         folder = AUDIO_DIR / category
         folder.mkdir(parents=True, exist_ok=True)
         return [
-            p for p in folder.iterdir()
-            if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+            p for p in folder.rglob("*")
+            if p.is_file() and p.suffix.casefold() in AUDIO_EXTENSIONS
         ]
 
     def close(self):
